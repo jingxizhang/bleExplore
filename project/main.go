@@ -11,7 +11,7 @@ import (
 
 func main() {
 	done := make(chan struct{})
-	action := make(chan bleExplore.PeripheralAction)
+	action := make(chan *bleExplore.PeripheralAdv)
 
 	filterUuids := []ble.UUID{
 		ble.MustParse("71A0"),
@@ -19,7 +19,6 @@ func main() {
 		ble.MustParse("71A3"),
 	}
 
-	//fmt.Printf("check first UUID: %d")
 	d, err := dev.NewDevice("default")
 	if err != nil {
 		log.Fatalf("can't new device : %s", err)
@@ -32,8 +31,11 @@ func main() {
 	defer close(done)
 
 	for act := range action {
-		if act.Mode == bleExplore.PeripheralAdd {
-			fmt.Printf("Find a peripheral: %s at %v\n",
+		if act.Count > 0 {
+			fmt.Printf("Add a peripheral: %s at %v\n",
+				act.Adv.LocalName(), act.Adv.Address().String())
+		} else {
+			fmt.Printf("Remove a peripheral: %s at %v\n",
 				act.Adv.LocalName(), act.Adv.Address().String())
 		}
 	}

@@ -10,19 +10,23 @@ import (
 )
 
 const (
-	PeripheralAdd    = iota
-	PeripheralRemote = iota
+	// PeripheralAdd    = iota
+	// PeripheralRemove = iota
+	retryCount = 5
 )
 
-type PeripheralAction struct {
-	Adv  ble.Advertisement
-	Mode int
+type PeripheralAdv struct {
+	Adv   ble.Advertisement
+	Count int
 }
 
-var peripherals = make(map[string]ble.Advertisement)
+var peripherals = make(map[string]*PeripheralAdv)
 
-func RunDiscovery(done <-chan struct{}, uuids []ble.UUID, action chan<- PeripheralAction) {
-	newPeripherals := []ble.Advertisement{}
+// Start a goroutine for discovery filtered peripheral devices
+// Newly discovered perpheral is sent by action channel
+func RunDiscovery(done <-chan struct{}, uuids []ble.UUID, action chan<- *PeripheralAdv) {
+	// newPeripherals := make(map[string]ble.Advertisement)
+	// repeatCount := 3
 	uuidSet := make(map[string]struct{})
 	for _, uuid := range uuids {
 		// fmt.Printf("Expect Service UUID: %s\n", uuid)
@@ -43,10 +47,13 @@ func RunDiscovery(done <-chan struct{}, uuids []ble.UUID, action chan<- Peripher
 	advHandler := func(a ble.Advertisement) {
 		addr := a.Address().String()
 		// fmt.Printf("Received an advertisement: %s, address=%s\n",a.LocalName(), addr)
-		if _, exist := peripherals[addr]; !exist {
-			peripherals[addr] = a
-			newPeripherals = append(newPeripherals, a)
-			action <- PeripheralAction{a, PeripheralAdd}
+		adv, exist := peripherals[addr]
+		if exist {
+			adv.Count = retryCount
+		} else {
+			adv := &PeripheralAdv{a, retryCount}
+			peripherals[addr] = adv
+			action <- adv
 		}
 	}
 
@@ -56,16 +63,29 @@ func RunDiscovery(done <-chan struct{}, uuids []ble.UUID, action chan<- Peripher
 	}()
 
 	for {
-		fmt.Println("Start scan")
+		// fmt.Println("Start scan")
+		// fmt.Printf("Time = %v\n", time.Now().Second())
 		ctx := ble.WithSigHandler(context.WithTimeout(context.Background(), 2*time.Second))
 		go ble.Scan(ctx, false, advHandler, filter)
 		select {
 		case <-ctx.Done():
+			// fmt.Printf("ctx done error type is: %v\n", ctx.Err())
+			if ctx.Err() != context.DeadlineExceeded {
+				return
+			}
 		case <-done:
 			return
 		}
-		fmt.Println("Sleep")
+
+		for k, v := range peripherals {
+			// fmt.Printf("Count = %d\n", v.Count)
+			if v.Count--; v.Count <= 0 {
+				delete(peripherals, k)
+				action <- v
+			}
+		}
+
+		// fmt.Println("Sleep")
 		time.Sleep(2 * time.Second)
 	}
-
 }
